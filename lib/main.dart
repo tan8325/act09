@@ -1,122 +1,366 @@
 import 'package:flutter/material.dart';
+import 'database_helper.dart';
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const CardOrganizerApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class CardOrganizerApp extends StatelessWidget {
+  const CardOrganizerApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Card Organizer',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const FoldersScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class FoldersScreen extends StatefulWidget {
+  const FoldersScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<FoldersScreen> createState() => _FoldersScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _FoldersScreenState extends State<FoldersScreen> {
+  final DatabaseHelper dbHelper = DatabaseHelper();
+  List<Map<String, dynamic>> folders = [];
+  Map<int, int> cardCounts = {};
+  bool isLoading = true;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    loadFolders();
+  }
+
+  Future<void> loadFolders() async {
+    setState(() => isLoading = true);
+    
+    folders = await dbHelper.getFolders();
+    cardCounts = {};
+    
+    // Get card count for each folder
+    for (var folder in folders) {
+      int count = await dbHelper.getCardCountInFolder(folder['id']);
+      cardCounts[folder['id']] = count;
+    }
+    
+    setState(() => isLoading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Card Organizer'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : GridView.builder(
+            padding: const EdgeInsets.all(10),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.0,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
             ),
-          ],
-        ),
+            itemCount: folders.length,
+            itemBuilder: (context, index) {
+              final folder = folders[index];
+              final id = folder['id'];
+              final count = cardCounts[id] ?? 0;
+              
+              return GestureDetector(
+                onTap: () {
+                  // Navigate to cards screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => CardsScreen(
+                        folderId: id,
+                        folderName: folder['name'],
+                      ),
+                    ),
+                  ).then((_) => loadFolders());
+                },
+                child: Card(
+                  color: _getSuitColor(folder['name']),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _getSuitSymbol(folder['name']),
+                        style: const TextStyle(fontSize: 40),
+                      ),
+                      Text(
+                        folder['name'],
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text('Cards: $count/6'),
+                      if (count < 3)
+                        const Text(
+                          'Needs at least 3 cards',
+                          style: TextStyle(color: Colors.red, fontSize: 12),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+    );
+  }
+
+  String _getSuitSymbol(String suit) {
+    switch (suit) {
+      case 'Hearts': return '♥️';
+      case 'Diamonds': return '♦️';
+      case 'Spades': return '♠️';
+      case 'Clubs': return '♣️';
+      default: return '?';
+    }
+  }
+
+  Color _getSuitColor(String suit) {
+    switch (suit) {
+      case 'Hearts': 
+      case 'Diamonds': 
+        return Colors.red.shade100;
+      case 'Spades': 
+      case 'Clubs': 
+        return Colors.grey.shade300;
+      default: 
+        return Colors.blue.shade100;
+    }
+  }
+}
+
+class CardsScreen extends StatefulWidget {
+  final int folderId;
+  final String folderName;
+
+  const CardsScreen({
+    super.key,
+    required this.folderId,
+    required this.folderName,
+  });
+
+  @override
+  State<CardsScreen> createState() => _CardsScreenState();
+}
+
+class _CardsScreenState extends State<CardsScreen> {
+  final DatabaseHelper dbHelper = DatabaseHelper();
+  List<Map<String, dynamic>> cardsInFolder = [];
+  List<Map<String, dynamic>> availableCards = [];
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadCards();
+  }
+
+  Future<void> loadCards() async {
+    setState(() => isLoading = true);
+    
+    // Get cards in this folder
+    cardsInFolder = await dbHelper.getCardsInFolder(widget.folderId);
+    
+    // Get available cards of this suit
+    availableCards = await dbHelper.getAvailableCardsBySuit(widget.folderName);
+    
+    setState(() => isLoading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${widget.folderName} Cards'),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      body: isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
+            children: [
+              // Cards in folder
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  'Cards in Folder (${cardsInFolder.length}/6)',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              cardsInFolder.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: Text('No cards in this folder'),
+                  )
+                : Expanded(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.all(10),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        childAspectRatio: 0.7,
+                        crossAxisSpacing: 5,
+                        mainAxisSpacing: 5,
+                      ),
+                      itemCount: cardsInFolder.length,
+                      itemBuilder: (context, index) {
+                        final card = cardsInFolder[index];
+                        return _buildCardItem(
+                          card, 
+                          canRemove: cardsInFolder.length > 3,
+                          onAction: () => _removeCard(card['id']),
+                          actionIcon: Icons.remove,
+                          actionColor: Colors.red,
+                        );
+                      },
+                    ),
+                  ),
+              
+              const Divider(thickness: 2),
+              
+              // Available cards
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  'Available ${widget.folderName} Cards',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              availableCards.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: Text('No available cards'),
+                  )
+                : Expanded(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.all(10),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        childAspectRatio: 0.7,
+                        crossAxisSpacing: 5,
+                        mainAxisSpacing: 5,
+                      ),
+                      itemCount: availableCards.length,
+                      itemBuilder: (context, index) {
+                        final card = availableCards[index];
+                        return _buildCardItem(
+                          card, 
+                          canRemove: true,
+                          onAction: () => _addCard(card['id']),
+                          actionIcon: Icons.add,
+                          actionColor: Colors.green,
+                        );
+                      },
+                    ),
+                  ),
+            ],
+          ),
+    );
+  }
+
+  Widget _buildCardItem(
+    Map<String, dynamic> card, {
+    required bool canRemove,
+    required VoidCallback onAction,
+    required IconData actionIcon,
+    required Color actionColor,
+  }) {
+    return Card(
+      child: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: Text(
+                _getCardEmoji(card['suit'], card['name']),
+                style: const TextStyle(fontSize: 36),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(4.0),
+            child: Text(
+              card['name'],
+              style: const TextStyle(fontSize: 10),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (canRemove)
+            IconButton(
+              icon: Icon(actionIcon, color: actionColor),
+              onPressed: onAction,
+              iconSize: 20,
+              padding: EdgeInsets.zero,
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _getCardEmoji(String suit, String name) {
+    String symbol = '';
+    switch (suit) {
+      case 'Hearts': symbol = '♥️'; break;
+      case 'Diamonds': symbol = '♦️'; break;
+      case 'Spades': symbol = '♠️'; break;
+      case 'Clubs': symbol = '♣️'; break;
+      default: symbol = '?';
+    }
+    
+    // Get first character of name for rank
+    String rank = name.split(' ').first[0];
+    return '$rank$symbol';
+  }
+
+  Future<void> _addCard(int cardId) async {
+    // Check if folder has max cards (6)
+    if (cardsInFolder.length >= 6) {
+      _showMessage('This folder can only hold 6 cards');
+      return;
+    }
+    
+    // Add card to folder
+    await dbHelper.addCardToFolder(cardId, widget.folderId);
+    loadCards();
+  }
+
+  Future<void> _removeCard(int cardId) async {
+    // Check if folder has min cards (3)
+    if (cardsInFolder.length <= 3) {
+      _showMessage('You need at least 3 cards in this folder');
+      return;
+    }
+    
+    // Remove card from folder
+    await dbHelper.removeCardFromFolder(cardId);
+    loadCards();
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 }
