@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'database_helper.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+final Map<String, SvgPicture> _svgCache = {};
+
 void main() => runApp(const CardOrganizerApp());
 
 class CardOrganizerApp extends StatelessWidget {
@@ -38,12 +40,17 @@ class _FoldersScreenState extends State<FoldersScreen> {
 
   Future<void> loadFolders() async {
     setState(() => isLoading = true);
-    folders = await dbHelper.getFolders();
-    cardCounts = {
-      for (var folder in folders)
-        folder['id']: await dbHelper.getCardCountInFolder(folder['id']),
-    };
-    setState(() => isLoading = false);
+    try {
+      folders = await dbHelper.getFolders();
+      cardCounts = {
+        for (var folder in folders)
+          folder['id']: await dbHelper.getCardCountInFolder(folder['id']),
+      };
+      setState(() => isLoading = false);
+    } catch (e) {
+      setState(() => isLoading = false);
+      print('Error loading folders: $e');
+    }
   }
 
   @override
@@ -55,7 +62,10 @@ class _FoldersScreenState extends State<FoldersScreen> {
           : GridView.builder(
               padding: const EdgeInsets.all(10),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10),
+                crossAxisCount: 2,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+              ),
               itemCount: folders.length,
               itemBuilder: (context, index) {
                 final folder = folders[index];
@@ -83,7 +93,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           if (count > 0)
-                            FutureBuilder<String>( 
+                            FutureBuilder<String>(
                               future: dbHelper.getFirstCardImage(folder['id']),
                               builder: (context, snapshot) {
                                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -92,18 +102,26 @@ class _FoldersScreenState extends State<FoldersScreen> {
                                 if (snapshot.hasError) {
                                   return const Icon(Icons.error);
                                 }
-                                return SvgPicture.network(
-                                  snapshot.data!,
-                                  width: 80,
-                                  height: 80,
-                                  placeholderBuilder: (context) => const CircularProgressIndicator(),
-                                );
+                                if (_svgCache.containsKey(snapshot.data!)) {
+                                  return _svgCache[snapshot.data!]!;
+                                } else {
+                                  final picture = SvgPicture.network(
+                                    snapshot.data!,
+                                    width: 80,
+                                    height: 80,
+                                    placeholderBuilder: (context) => const CircularProgressIndicator(),
+                                  );
+                                  _svgCache[snapshot.data!] = picture;
+                                  return picture;
+                                }
                               },
                             ),
                           if (count == 0) const Icon(Icons.image, size: 80, color: Colors.grey),
                           const SizedBox(height: 10),
                           Text('Cards: $count/6'),
-                          if (count < 3) const Text('Needs at least 3 cards', style: TextStyle(color: Colors.red, fontSize: 12)),
+                          if (count < 3)
+                            const Text('Needs at least 3 cards',
+                                style: TextStyle(color: Colors.red, fontSize: 12)),
                         ],
                       ),
                     ),
@@ -127,9 +145,10 @@ class CardsScreen extends StatefulWidget {
 
 class _CardsScreenState extends State<CardsScreen> {
   final DatabaseHelper dbHelper = DatabaseHelper();
-  List<Map<String, dynamic>> cardsInFolder = [], availableCards = [];
+  List<Map<String, dynamic>> cardsInFolder = [];
+  List<Map<String, dynamic>> availableCards = [];
   bool isLoading = true;
-  Set<int> selectedCards = Set<int>();
+  Set<int> selectedCards = {};
 
   @override
   void initState() {
@@ -139,10 +158,15 @@ class _CardsScreenState extends State<CardsScreen> {
 
   Future<void> loadCards() async {
     setState(() => isLoading = true);
-    cardsInFolder = await dbHelper.getCardsInFolder(widget.folderId);
-    availableCards = await dbHelper.getAvailableCardsBySuit(widget.folderName);
-    selectedCards = cardsInFolder.map((card) => card['id'] as int).toSet();
-    setState(() => isLoading = false);
+    try {
+      cardsInFolder = await dbHelper.getCardsInFolder(widget.folderId);
+      availableCards = await dbHelper.getAvailableCardsBySuit(widget.folderName);
+      selectedCards = cardsInFolder.map((card) => card['id'] as int).toSet();
+      setState(() => isLoading = false);
+    } catch (e) {
+      setState(() => isLoading = false);
+      print('Error loading cards: $e');
+    }
   }
 
   @override
@@ -168,13 +192,20 @@ class _CardsScreenState extends State<CardsScreen> {
       child: Column(
         children: [
           Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          if (cards.isEmpty) const Padding(padding: EdgeInsets.all(20.0), child: Text('No cards available')),
+          if (cards.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(20.0),
+              child: Text('No cards available'),
+            ),
           GridView.builder(
             padding: const EdgeInsets.all(10),
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10),
+              crossAxisCount: 3,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+            ),
             itemCount: cards.length,
             itemBuilder: (context, index) {
               final card = cards[index];
@@ -215,14 +246,13 @@ class _CardsScreenState extends State<CardsScreen> {
 
   Widget _buildActionButton(int cardId, bool isSelected, Future<void> Function(int) onCardAction) {
     return IconButton(
-      onPressed: () {
-        setState(() {
-          if (isSelected) selectedCards.remove(cardId);
-          else selectedCards.add(cardId);
-        });
-        onCardAction(cardId);
+      onPressed: () async {
+        await onCardAction(cardId);
       },
-      icon: Icon(isSelected ? Icons.remove : Icons.add, color: isSelected ? Colors.red : Colors.green),
+      icon: Icon(
+        isSelected ? Icons.remove : Icons.add,
+        color: isSelected ? Colors.red : Colors.green,
+      ),
       iconSize: 15,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
@@ -230,7 +260,18 @@ class _CardsScreenState extends State<CardsScreen> {
   }
 
   Future<void> _addCard(int cardId) async {
-    await dbHelper.addCardToFolder(cardId, widget.folderId);
+    final result = await dbHelper.addCardToFolder(cardId, widget.folderId);
+    if (result == -1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Maximum cards reached (6)!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
     loadCards();
   }
 

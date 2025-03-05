@@ -10,19 +10,19 @@ class DatabaseHelper {
   final String cardTable = 'cards';
 
   factory DatabaseHelper() => _instance;
+
   DatabaseHelper._internal();
 
-  Future<Database> get _db async {
+  Future<Database> get database async {
     _database ??= await _initDatabase();
     return _database!;
   }
 
   Future<Database> _initDatabase() async {
-    final path = join(await getDatabasesPath(), 'card_organizer.db');
+    String path = join(await getDatabasesPath(), 'card_organizer.db');
     return await openDatabase(path, version: 1, onCreate: _onCreate);
   }
 
-  // Create tables
   Future _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE $folderTable (
@@ -41,49 +41,85 @@ class DatabaseHelper {
         folderId INTEGER
       )
     ''');
+
+    await _insertDefaultData(db);
   }
 
-  // Get all folders
-  Future<List<Map<String, dynamic>>> getFolders() async {
-    final db = await _db;
-    return await db.query(folderTable);
+  Future _insertDefaultData(Database db) async {
+    String now = DateTime.now().toIso8601String();
+    List<String> folders = ['Hearts', 'Spades', 'Diamonds', 'Clubs'];
+    List<String> suits = ['Hearts', 'Spades', 'Diamonds', 'Clubs'];
+    List<String> ranks = ['Ace', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King'];
+
+    await Future.wait(folders.map((folder) => db.insert(folderTable, {
+      'name': folder,
+      'timestamp': now
+    })));
+
+    for (String suit in suits) {
+      for (String rank in ranks) {
+        String cardName = '$rank of $suit';
+        String imageUrl = 'https://www.tekeye.uk/playing_cards/images/svg_playing_cards/fronts/${suit.toLowerCase()}_${rank.toLowerCase()}.svg';
+        await db.insert(cardTable, {
+          'name': cardName,
+          'suit': suit,
+          'imageUrl': imageUrl,
+          'folderId': null,
+        });
+      }
+    }
   }
 
-  // Get cards in a folder
-  Future<List<Map<String, dynamic>>> getCardsInFolder(int folderId) async {
-    final db = await _db;
-    return await db.query(cardTable, where: 'folderId = ?', whereArgs: [folderId]);
+  Future<List<Map<String, dynamic>>> _query(String table, {String? where, List<dynamic>? whereArgs}) async {
+    final db = await database;
+    return await db.query(table, where: where, whereArgs: whereArgs);
   }
 
-  // Get available cards by suit (not in any folder)
-  Future<List<Map<String, dynamic>>> getAvailableCardsBySuit(String suit) async {
-    final db = await _db;
-    return await db.query(cardTable, where: 'suit = ? AND folderId IS NULL', whereArgs: [suit]);
-  }
+  Future<List<Map<String, dynamic>>> getFolders() => _query(folderTable);
 
-  // Add card to folder (with a limit of 6 cards per folder)
+  Future<List<Map<String, dynamic>>> getCardsInFolder(int folderId) =>
+      _query(cardTable, where: 'folderId = ?', whereArgs: [folderId]);
+
+  Future<List<Map<String, dynamic>>> getAvailableCardsBySuit(String suit) =>
+      _query(cardTable, where: 'suit = ? AND folderId IS NULL', whereArgs: [suit]);
+
   Future<int> addCardToFolder(int cardId, int folderId) async {
-    if (await getCardCountInFolder(folderId) >= 6) return -1;  // Folder full
-    final db = await _db;
-    return await db.update(cardTable, {'folderId': folderId}, where: 'id = ?', whereArgs: [cardId]);
+    int count = await getCardCountInFolder(folderId);
+    if (count >= 6) return -1;
+
+    final db = await database;
+    return await db.update(
+      cardTable,
+      {'folderId': folderId},
+      where: 'id = ?',
+      whereArgs: [cardId],
+    );
   }
 
-  // Remove card from folder
   Future<int> removeCardFromFolder(int cardId) async {
-    final db = await _db;
-    return await db.update(cardTable, {'folderId': null}, where: 'id = ?', whereArgs: [cardId]);
+    final db = await database;
+    return await db.update(
+      cardTable,
+      {'folderId': null},
+      where: 'id = ?',
+      whereArgs: [cardId],
+    );
   }
 
-  // Get card count in folder
   Future<int> getCardCountInFolder(int folderId) async {
-    final db = await _db;
-    return Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $cardTable WHERE folderId = ?', [folderId])) ?? 0;
+    final db = await database;
+    return Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $cardTable WHERE folderId = ?',
+      [folderId],
+    )) ?? 0;
   }
 
-  // Get the first card image in the folder
   Future<String> getFirstCardImage(int folderId) async {
-    final db = await _db;
-    final result = await db.query(cardTable, where: 'folderId = ?', whereArgs: [folderId], limit: 1);
-    return result.isNotEmpty ? result.first['imageUrl'] as String : '';  // Return empty string if no card found
+    final db = await database;
+    final result = await db.query('cards', where: 'folderId = ?', whereArgs: [folderId], limit: 1);
+    if (result.isNotEmpty) {
+      return result.first['imageUrl'] as String;
+    }
+    return ''; 
   }
 }
